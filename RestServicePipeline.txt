@@ -1,0 +1,54 @@
+pipeline{
+    agent {label 'master'}
+       tools {
+        maven 'Local Maven'
+    }
+    stages{
+        stage('Download Ln Integ'){
+            steps{
+                git "ssh://mdmizanur.rahman@review2.bjitgroup.com:29418/p1114_catia_v6_ln_integ"
+            }
+        }
+        stage('Prebuild Steps of Ln Integ'){
+            steps{
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/src/lib/FcsClient.jar" -DgroupId=com.bjit.plmkey.18x.FcsClient -DartifactId=FcsClient -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/src/lib/framework.jar" -DgroupId=com.bjit.plmkey.18x.framework -DartifactId=framework -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/src/lib/eMatrixServletRMI.jar" -DgroupId=com.bjit.plmkey.18x.eMatrixServletRMI -DartifactId=eMatrixServletRMI -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn clean install -P 18x-test1'
+            }
+        }
+        stage('EnoviaRestService'){
+            steps{
+            dir('RestServiceBuild'){
+                git  "ssh://mdmizanur.rahman@review2.bjitgroup.com:29418/p1114_catia_v6_enovia_rest_service"
+                sh label: '', script: 'cp -r /var/lib/jenkins/workspace/EnoviaRestService/target/LNIntegration-1.0.jar /var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/eMatrixServletRMI.jar" -DgroupId=com.bjit.plmkey.18x.eMatrixServletRMI -DartifactId=eMatrixServletRMI -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/FcsClient.jar" -DgroupId=com.bjit.plmkey.18x.FcsClient -DartifactId=FcsClient -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/framework.jar" -DgroupId=com.bjit.plmkey.18x.framework -DartifactId=framework -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/LNIntegration-1.0.jar" -DgroupId=com.bjit.lnintegration.18x.LNIntegration -DartifactId=LNIntegration -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn install:install-file -Dfile="/var/lib/jenkins/workspace/EnoviaRestService/RestServiceBuild/lib/arialUnicode.jar" -DgroupId=unicode.ArialUnicode -DartifactId=ArialUnicode -Dversion=1.0 -Dpackaging=jar'
+                sh label: '', script: 'mvn clean install -P mig2 help:all-profiles'
+                }
+            }
+        }
+        	stage('Transfer RestService war file'){
+    		    steps{
+    		        
+    		        sshPublisher(publishers: [sshPublisherDesc(configName: 'app1linuxrest', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: 'RestServiceBuild/target', sourceFiles: 'RestServiceBuild/target/*.war')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+    		        
+    		 }
+    	}
+    	stage('restservicedocker build'){
+    	     agent {label 'App1Linux'}
+    	    steps{
+    	        sh label: '', script: '''
+    	        cd /usr/local/RestService
+                docker ps > containerlist.txt
+                docker stop `cat containerlist.txt | grep "restservice" | awk '{print $1}'`
+                docker rm -f `cat containerlist.txt | grep "restservice" | awk '{print $1}'`
+                docker build -t restservice .
+                docker run -t -d -p 6305:8005 -p 6309:8009 -p 6363:8080 --restart always --name EnoviaRestService restservice'''
+    	    }
+    	}
+    }
+}

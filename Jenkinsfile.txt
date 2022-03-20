@@ -1,0 +1,108 @@
+pipeline {
+	agent any
+	 parameters {
+  string defaultValue: '', description: '', name: 'container_name', trim: false
+  string defaultValue: '', description: '', name: 'image_name', trim: false
+  string defaultValue: '', description: '', name: 'port', trim: false
+  string defaultValue: '', description: '', name: 'Dockerfile_location', trim: false
+}
+	tools { 
+        maven 'Local Maven'  
+    }
+	stages {
+
+		stage('SCM rest service war') {
+			steps {
+			git 'ssh://md.kawsaruzzaman@review2.bjitgroup.com:29418/p1114_catia_v6_enovia_rest_service'
+			}
+			}
+		stage('Build Rest war') {
+			steps {
+			sh label: '', script: 'cp -r ../V6_LN_Integration/target/LNIntegration-1.0.jar .\\lib'
+			sh label: '', script: 'mvn install:install-file -Dfile=./lib/eMatrixServletRMI.jar -DgroupId=com.bjit.plmkey.18x.eMatrixServletRMI -DartifactId=eMatrixServletRMI -Dversion=1.0 -Dpackaging=jar'
+			sh label: '', script: 'mvn install:install-file -Dfile=./lib/FcsClient.jar -DgroupId=com.bjit.plmkey.18x.FcsClient -DartifactId=FcsClient -Dversion=1.0 -Dpackaging=jar'
+			sh label: '', script: 'mvn install:install-file -Dfile=./lib/framework.jar -DgroupId=com.bjit.plmkey.18x.framework -DartifactId=framework -Dversion=1.0 -Dpackaging=jar'
+			sh label: '', script: 'mvn install:install-file -Dfile=./lib/LNIntegration-1.0.jar -DgroupId=com.bjit.lnintegration.18x.LNIntegration -DartifactId=LNIntegration -Dversion=1.0 -Dpackaging=jar'
+			sh label: '', script: 'mvn install:install-file -Dfile=./lib/arialUnicode.jar -DgroupId=unicode.ArialUnicode -DartifactId=ArialUnicode -Dversion=1.0 -Dpackaging=jar'
+			sh label: '', script: 'mvn clean install -P mig2 help:all-profiles'
+				}
+			}
+		
+		stage('Pull dockerfile') 
+		{
+		
+		    steps {
+				checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'Gitlab_Devops', url: 'https://gitlab.devops-bjit.com/root/docker.git']]])	
+				}
+		
+		}
+		stage('Transfer Dockerfile') 
+		{				
+			steps {
+		
+				sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '**/Dockerfile')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+		}
+		
+		stage('Transfer Rest Service war') 
+		{				
+			steps {
+				sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '**/target/*.war')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+		}
+		
+		stage('Deploy_container')	
+		{
+			steps {
+				
+				sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '''
+				cd ${Dockerfile_location};
+				docker ps -q > result.txt
+				docker stop `head -n -1 result.txt`
+				docker rename ${container_name} ${container_name}_`expr ${BUILD_NUMBER} - 1`;
+				docker rm ${container_name};
+                docker image rm -f ${image_name};
+                docker build -t ${image_name} .;
+                docker run -t -d -p ${port}:8080 --restart always --name ${container_name} ${image_name};''', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+		}
+		
+		stage('Robot Framework Test') {
+			steps {
+			    
+			    sshPublisher(publishers: [sshPublisherDesc(configName: 'DevOps_Test', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: 
+			    'cmd /c robot D:\\Jenkins\\EnoviaRestService.robot', execTimeout: 210000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+			     
+			    sshPublisher(publishers: [sshPublisherDesc(configName: 'DevOps_Test', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: 
+				'cmd /c D:\\Jenkins\\PSCP\\pscp.exe -i "D:\\Jenkins\\keys\\app_linux_key.ppk" "C:\\Users\\devops\\log.html" "C:\\Users\\devops\\output.xml" "C:\\Users\\devops\\report.html" jenkins@10.15.15.35:/var/lib/jenkins/workspace/GerriTest/reports', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+			    
+			    robot logFileName: 'log.html', outputFileName: 'output.xml', outputPath: '/var/lib/jenkins/workspace/GerriTest/reports', reportFileName: 'report.html'
+			}	
+		}
+		
+	}	
+
+post {
+		success {
+				sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '''
+				docker image tag ${image_name} "${image_name}:$BUILD_NUMBER";
+				docker push "${image_name}:$BUILD_NUMBER";''', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+		
+		failure {
+                sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '''
+                docker ps -q > result.txt
+                docker stop `head -n -1 result.txt`
+                docker start `docker ps -l | awk \'{ print $1 }\' | tail -n 1`
+                ''', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+		
+		unstable{
+                sshPublisher(publishers: [sshPublisherDesc(configName: 'Docker_Deployment_10_38', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '''
+                docker ps -q > result.txt
+                docker stop `head -n -1 result.txt`
+                docker start `docker ps -l | awk \'{ print $1 }\' | tail -n 1`
+                ''', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+				}
+	}
+}

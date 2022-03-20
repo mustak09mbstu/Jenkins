@@ -1,0 +1,41 @@
+pipeline{
+    agent {label 'master'}
+     tools {
+        maven 'Local Maven'
+    }
+    stages {
+        
+            stage('Git Checkout') {
+			    steps {
+			    git 'ssh://mdmustafizur.rahman@review2.bjitgroup.com:29418/p1114_catia_v6_enovia_message_queue'
+			}
+    		}
+    		stage('Build Enovia Message Queue'){
+    		    steps {
+    		        sh label: '', script: 'mvn clean install'
+    		    }
+    		}
+    		
+    		stage('Transfer EnoviaMessageQueue war file'){
+    		    steps{
+    		        sshPublisher(publishers: [sshPublisherDesc(configName: 'app1linux', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: '', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: 'target', sourceFiles: 'target/*.war')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+    		        
+    		    }
+    		}
+    		
+    	
+    		    stage ('Container build'){
+    		        agent {label 'App1Linux'}
+    		        steps{
+    		            sh label: '', script: '''
+    		            cd /usr/local/EnoviaMessageQueue
+    		            docker ps > result.txt
+                        docker stop `cat result.txt | grep "messagequeue" | awk '{print $1}'`
+                        docker rm -f `cat result.txt | grep "messagequeue" | awk '{print $1}'`
+                        docker build -t messagequeue .
+                        docker run -t -d -p 7676:8080 --restart always --name EnoviaMessageQueue messagequeue
+                        '''
+    		        }
+    		    }
+}
+}
